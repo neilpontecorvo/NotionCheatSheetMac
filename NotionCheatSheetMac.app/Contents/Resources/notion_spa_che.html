@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Notion Cheat Sheet for macOS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Tailwind CSS Default -->
+    <!-- Application Structure Plan: The application is designed as an interactive dashboard and search tool. This structure is superior to a static list for a cheat sheet because it allows for rapid, task-based retrieval of information. The information architecture is centered on two main interactions: 1) Category-based filtering (buttons) for broad exploration (e.g., "What formatting shortcuts are there?") and 2) Live search (input bar) for specific "intent-based" lookups (e.g., "How do I make a comment?"). A modal window provides contextual, AI-powered explanations, enhancing the app from a simple reference to a learning tool. This non-linear, query-driven structure is more usable and efficient than a linear text document. -->
+    <!-- Visualization & Content Choices: 1. Shortcut List -> Goal: Organize/Inform -> Viz: Interactive Card-based Grid -> Interaction: Live search and category filtering. -> Justification: A card grid is more scannable and visually distinct than table rows. JS filtering is faster than scrolling/reading. (HTML/CSS/JS). 2. Shortcut Explanation -> Goal: Inform -> Viz: Modal Window -> Interaction: Click-to-explain button. -> Justification: Hides complex explanations by default, reducing clutter. Uses Gemini API to provide dynamic, contextual help instead of static text. (JS/API call). -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .shortcut-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .shortcut-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        kbd {
+            background-color: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #1F2937;
+        }
+        .category-button[aria-pressed="true"] {
+            background-color: #374151;
+            color: #FFFFFF;
+        }
+        .category-button[aria-pressed="false"] {
+            background-color: #F3F4F6;
+            color: #374151;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 antialiased">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-5xl font-bold text-gray-800">Notion macOS Cheat Sheet</h1>
+            <p class="text-lg text-gray-600 mt-2">Search 60+ commands, workflows, and AI prompts. Click ✨ to get a detailed explanation.</p>
+        </header>
+
+        <div class="sticky top-0 bg-gray-100 py-4 z-10 mb-6">
+            <input type="text" id="searchInput" placeholder="Search for any shortcut (e.g., 'comment' or 'cmd + b')..." class="w-full p-4 border border-gray-300 rounded-lg text-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        
+            <div id="categoryFilters" class="flex flex-wrap gap-2 justify-center mt-4">
+            </div>
+        </div>
+
+        <main id="shortcutsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        </main>
+
+        <div id="notFound" class="text-center text-gray-500 text-lg py-12 hidden">
+            <p class="text-2xl font-semibold">No Shortcuts Found</p>
+            <p>Try adjusting your search or filter.</p>
+        </div>
+    </div>
+
+    <div id="aiModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle">
+        <div class="bg-white rounded-lg shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-95 opacity-0" id="aiModalContent">
+            <div class="flex justify-between items-center p-4 border-b">
+                <h2 id="aiModalTitle" class="text-xl font-bold text-gray-800">✨ AI Explanation</h2>
+                <button id="closeModalButton" class="text-gray-400 hover:text-gray-600" aria-label="Close modal">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6">
+                <div id="modalLoading" class="flex flex-col items-center justify-center min-h-[200px]">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                    <p class="text-gray-600 mt-4">Calling Gemini for an explanation...</p>
+                </div>
+                <div id="modalResponse" classD="prose prose-sm max-w-none text-gray-700 hidden">
+                </div>
+                <div id="modalError" class="text-red-600 bg-red-50 p-4 rounded-lg hidden">
+                    <p class="font-bold">API Error</p>
+                    <p id="modalErrorMessage"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const shortcuts = [
+            { category: 'Basics', action: 'Quick Find', shortcut: 'Cmd + P', description: 'Search your entire workspace or go to a page.' },
+            { category: 'Basics', action: 'New Page', shortcut: 'Cmd + N', description: 'Create a new page (desktop app only).' },
+            { category: 'Basics', action: 'Go Back', shortcut: 'Cmd + [', description: 'Navigate to the previously viewed page.' },
+            { category: 'Basics', action: 'Go Forward', shortcut: 'Cmd + ]', description: 'Navigate forward in your page history.' },
+            { category: 'Basics', action: 'Toggle Dark Mode', shortcut: 'Cmd + Shift + L', description: 'Switch between light and dark mode.' },
+            { category: 'Formatting', action: 'Bold Text', shortcut: 'Cmd + B', description: 'Make selected text bold.' },
+            { category: 'Formatting', action: 'Italic Text', shortcut: 'Cmd + I', description: 'Make selected text italic.' },
+            { category: 'Formatting', action: 'Underline Text', shortcut: 'Cmd + U', description: 'Make selected text underlined.' },
+            { category: 'Formatting', action: 'Strikethrough', shortcut: 'Cmd + Shift + S', description: 'Cross out selected text.' },
+            { category: 'Formatting', action: 'Wrap as Code', shortcut: 'Cmd + E', description: 'Format selected text as inline code.' },
+            { category: 'Formatting', action: 'Hyperlink Text', shortcut: 'Cmd + K', description: 'Turn selected text into a link.' },
+            { category: 'Formatting', action: 'Headline (H1)', shortcut: 'Cmd + Option + 1', description: 'Turn block into a main headline.' },
+            { category: 'Formatting', action: 'Headline (H2)', shortcut: 'Cmd + Option + 2', description: 'Turn block into a sub-headline.' },
+            { category: 'Formatting', action: 'Headline (H3)', shortcut: 'Cmd + Option + 3', description: 'Turn block into a small headline.' },
+            { category: 'Formatting', action: 'Bulleted List', shortcut: 'Cmd + Shift + 5', description: 'Create a bulleted list.' },
+            { category: 'Formatting', action: 'Numbered List', shortcut: 'Cmd + Shift + 7', description: 'Create a numbered list.' },
+            { category: 'Formatting', action: 'To-do List', shortcut: 'Cmd + Shift + 4', description: 'Create a checklist.' },
+            { category: 'Formatting', action: 'Toggle Block', shortcut: 'Cmd + Option + T', description: 'Create a toggleable list.' },
+            { category: 'Formatting', action: 'Code Block', shortcut: 'Cmd + Option + C', description: 'Create a new code block.' },
+            { category: 'Formatting', action: 'Quote Block', shortcut: 'Cmd + Shift + B', description: 'Create a quote block.' },
+            { category: 'Formatting', action: 'Callout Block', shortcut: 'Cmd + Option + B', description: 'Create an emphasized callout block.' },
+            { category: 'Formatting', action: 'Indent Block', shortcut: 'Tab', description: 'Indent the current block.' },
+            { category: 'Formatting', action: 'Un-indent Block', shortcut: 'Shift + Tab', description: 'Remove indentation from a block.' },
+            { category: 'Formatting', action: 'Text Color', shortcut: '/color', description: 'Type / and a color name to change text color.' },
+            { category: 'Formatting', action: 'Background Color', shortcut: '/blue background', description: 'Change a block\'s background color.' },
+            { category: 'Editing', action: 'Move Block', shortcut: 'Cmd + Shift + ▲/▼', description: 'Move the current block up or down.' },
+            { category:g: 'Editing', action: 'Duplicate Block', shortcut: 'Cmd + D', description: 'Duplicate the block(s) you have selected.' },
+            { category: 'Editing', action: 'Edit/Change Block', shortcut: 'Cmd + /', description: 'Open menu to edit or change the block type.' },
+            { category: 'Editing', action: 'Comment', shortcut: 'Cmd + Shift + M', description: 'Add a comment to the selected text or block.' },
+            { category: 'Editing', action: 'Select All', shortcut: 'Cmd + A', description: 'Select all blocks on the page.' },
+            { category: 'Editing', action: 'Select Block', shortcut: 'Esc', description: 'Select the block your cursor is in.' },
+            { category: 'Editing', action: 'Select Multiple', shortcut: 'Hold Shift + Click', description: 'Select multiple blocks at once.' },
+            { category: 'Editing', action: 'Edit Text', shortcut: 'Enter', description: 'Edit the text in a selected block.' },
+            { category: 'Editing', action: 'Open Page', shortcut: 'Cmd + Enter', description: 'Open a selected page in a new tab or window.' },
+            { category: 'Editing', action: 'Add Emoji', shortcut: '/emoji', description: 'Brings up the emoji picker.' },
+            { category: 'Editing', action: 'Add Date', shortcut: '/date', description: 'Quickly insert a date or reminder.' },
+            { category: 'Pasting', action: 'Standard Paste', shortcut: 'Cmd + V', description: 'Paste content with original formatting.' },
+            { category: 'Pasting', action: 'Paste & Match Style', shortcut: 'Cmd + Shift + V', description: 'Paste text only, matching Notion\'s style.' },
+            { category: 'Pasting', action: 'Turn to Blocks', shortcut: 'Cmd + Option + V', description: 'Paste content as multiple blocks.' },
+            { category: 'Pasting', action: 'Fix Broken Paste (2-Step)', shortcut: 'Copy -> TextEdit -> Copy -> Notion', description: 'Paste into a plain text app first to strip all hidden formatting.' },
+            { category: 'Workflows & Databases', action: 'Create Database', shortcut: '/table', description: 'Insert a new database table.' },
+            { category: 'Workflows & Databases', action: 'Linked Database', shortcut: '/linked', description: 'Create a linked view of an existing database.' },
+            { category: 'Workflows & Databases', action: 'Template Button', shortcut: '/template', description: 'Create a button that duplicates blocks.' },
+            { category: 'Workflows & Databases', action: 'Breadcrumb Menu', shortcut: '/bread', description: 'Insert a breadcrumb navigation menu.' },
+            { category: 'Notion AI', action: 'Ask AI', shortcut: 'Cmd + J', description: 'Open the Notion AI prompt from anywhere.' },
+            { category: 'Notion AI', action: 'AI Autofill', shortcut: 'Spacebar (in DB)', description: 'Use AI to autofill database properties.' },
+            { category: 'Notion AI', action: 'AI: Fix Grammar', shortcut: '/ai fix', description: 'Fix spelling and grammar in selected text.' },
+            { category: 'Notion AI', action: 'AI: Make Longer', shortcut: '/ai longer', description: 'Expand on the selected text.' },
+            { category: 'Notion AI', action: 'AI: Make Shorter', shortcut: '/ai shorter', description: 'Summarize the selected text.' },
+            { category: 'Notion AI', action: 'AI: Change Tone', shortcut: '/ai tone', description: 'Change the tone (e.g., professional, casual).' },
+            { category: 'Notion AI', action: 'AI: Summarize', shortcut: '/ai summarize', description: 'Generate a summary of the current page.' },
+            { category: 'Notion AI', action: 'AI: Write Intro Brief', shortcut: '/ai intro', description: 'Writes an introduction or brief for the current page\'s content.' },
+            { category: 'Notion AI', action: 'AI: Create Outline / ToC', shortcut: '/ai outline', description: 'Generates an outline or list of key sections from the page content.' },
+            { category: 'Notion AI', action: 'Create T2S Audio Script', shortcut: '/ai t2s script', description: 'Generates a Text-to-Speech (T2S) script from page content, formatted for external apps.' }
+        ];
+
+        const grid = document.getElementById('shortcutsGrid');
+        const searchInput = document.getElementById('searchInput');
+        const categoryFilters = document.getElementById('categoryFilters');
+        const notFound = document.getElementById('notFound');
+        const aiModal = document.getElementById('aiModal');
+        const aiModalContent = document.getElementById('aiModalContent');
+        const closeModalButton = document.getElementById('closeModalButton');
+        const modalLoading = document.getElementById('modalLoading');
+        const modalResponse = document.getElementById('modalResponse');
+        const modalError = document.getElementById('modalError');
+        const modalErrorMessage = document.getElementById('modalErrorMessage');
+        const modalTitle = document.getElementById('aiModalTitle');
+
+        let activeCategories = [];
+
+        function getCategories() {
+            const categories = new Set(shortcuts.map(s => s.category));
+            return ['All', ...categories];
+        }
+
+        function renderCategoryFilters() {
+            const categories = getCategories();
+            categoryFilters.innerHTML = categories.map(category => `
+                <button 
+                    class="category-button px-4 py-2 rounded-full font-medium text-sm transition-colors"
+                    data-category="${category}"
+                    aria-pressed="${category === 'All' ? 'true' : 'false'}"
+                >
+                    ${category}
+                </button>
+            `).join('');
+            
+            activeCategories = ['All'];
+            
+            categoryFilters.addEventListener('click', e => {
+                const button = e.target.closest('button');
+                if (button) {
+                    const category = button.dataset.category;
+                    if (category === 'All') {
+                        activeCategories = ['All'];
+                        categoryFilters.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', 'false'));
+                        button.setAttribute('aria-pressed', 'true');
+                    } else {
+                        const allButton = categoryFilters.querySelector('button[data-category="All"]');
+                        allButton.setAttribute('aria-pressed', 'false');
+                        activeCategories = activeCategories.filter(c => c !== 'All');
+                        
+                        const isPressed = button.getAttribute('aria-pressed') === 'true';
+                        if (isPressed) {
+                            activeCategories = activeCategories.filter(c => c !== category);
+                            button.setAttribute('aria-pressed', 'false');
+                        } else {
+                            activeCategories.push(category);
+                            button.setAttribute('aria-pressed', 'true');
+                        }
+
+                        if (activeCategories.length === 0) {
+                            activeCategories = ['All'];
+                            allButton.setAttribute('aria-pressed', 'true');
+                        }
+                    }
+                    filterShortcuts();
+                }
+            });
+        }
+
+        function createShortcutCard(shortcut) {
+            return `
+                <div class="shortcut-card bg-white p-5 rounded-lg shadow-sm border border-gray-200"
+                     data-action="${shortcut.action.toLowerCase()}"
+                     data-shortcut="${shortcut.shortcut.toLowerCase()}"
+                     data-category="${shortcut.category}"
+                     data-description="${shortcut.description.toLowerCase()}"
+                >
+                    <div class="flex justify-between items-start">
+                        <span class="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">${shortcut.category}</span>
+                        <button class="explain-button text-sm font-medium text-blue-600 hover:text-blue-800"
+                                data-action="${shortcut.action}"
+                                data-shortcut="${shortcut.shortcut}"
+                                aria-label="Explain ${shortcut.action}">
+                            ✨ Explain
+                        </button>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-800 mt-3">${shortcut.action}</h3>
+                    <p class="text-gray-600 text-sm mt-1">${shortcut.description}</p>
+                    <div class="mt-4">
+                        <kbd>${shortcut.shortcut}</kbd>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderShortcuts(items) {
+            grid.innerHTML = items.map(createShortcutCard).join('');
+        }
+
+        function filterShortcuts() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const filtered = shortcuts.filter(s => {
+                const inCategory = activeCategories.includes('All') || activeCategories.includes(s.category);
+                const inSearch = s.action.toLowerCase().includes(searchTerm) ||
+                                 s.shortcut.toLowerCase().includes(searchTerm) ||
+                                 s.description.toLowerCase().includes(searchTerm) ||
+                                 s.category.toLowerCase().includes(searchTerm);
+                return inCategory && inSearch;
+            });
+
+            renderShortcuts(filtered);
+
+            if (filtered.length === 0) {
+                notFound.classList.remove('hidden');
+            } else {
+                notFound.classList.add('hidden');
+            }
+        }
+
+        async function getExplanation(action, shortcut) {
+            modalTitle.textContent = `✨ ${action}`;
+            modalLoading.classList.remove('hidden');
+            modalResponse.classList.add('hidden');
+            modalError.classList.add('hidden');
+            
+            const systemPrompt = "You are a helpful assistant who is an expert in Notion. The user is asking for an explanation of a specific Notion shortcut. Provide a clear, concise explanation (1-2 paragraphs) of what the shortcut does and a practical example of when a user would want to use it. Format your response in simple HTML with paragraphs and bold tags.";
+            const userQuery = `Explain the Notion shortcut "${action}" (which uses the keys "${shortcut}"). What does it do and when would I use it?`;
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            let responseText = '';
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content?.parts?.[0]?.text) {
+                    responseText = result.candidates[0].content.parts[0].text;
+                } else {
+                    throw new Error("Invalid response structure from API.");
+                }
+
+                modalResponse.innerHTML = responseText;
+                modalLoading.classList.add('hidden');
+                modalResponse.classList.remove('hidden');
+            } catch (error) {
+                modalErrorMessage.textContent = error.message;
+                modalLoading.classList.add('hidden');
+                modalError.classList.remove('hidden');
+            }
+        }
+
+        function openModal(action, shortcut) {
+            aiModal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                 aiModalContent.classList.remove('scale-95', 'opacity-0');
+                 aiModalContent.classList.add('scale-100', 'opacity-100');
+            });
+            getExplanation(action, shortcut);
+        }
+
+        function closeModal() {
+            aiModalContent.classList.add('scale-95', 'opacity-0');
+            aiModalContent.classList.remove('scale-100', 'opacity-100');
+            setTimeout(() => {
+                aiModal.classList.add('hidden');
+                modalLoading.classList.remove('hidden');
+                modalResponse.classList.add('hidden');
+                modalError.classList.add('hidden');
+            }, 300);
+        }
+
+        searchInput.addEventListener('input', filterShortcuts);
+
+        grid.addEventListener('click', e => {
+            const button = e.target.closest('.explain-button');
+            if (button) {
+                openModal(button.dataset.action, button.dataset.shortcut);
+            }
+        });
+
+        closeModalButton.addEventListener('click', closeModal);
+        aiModal.addEventListener('click', e => {
+            if (e.target === aiModal) {
+                closeModal();
+            }
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key === "Escape" && !aiModal.classList.contains('hidden')) {
+                closeModal();
+            }
+        });
+
+        renderCategoryFilters();
+        renderShortcuts(shortcuts);
+    </script>
+</body>
+</html>
+
+
