@@ -22,12 +22,14 @@ struct WebView: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
         // Find the path to your HTML file in the app bundle
-        if let url = Bundle.main.url(forResource: localFileName, withExtension: "html") {
-            // Allow the WebView to read from this file path
-            nsView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        if let url = Bundle.main.url(forResource: localFileName, withExtension: "html"),
+           let htmlString = try? String(contentsOf: url, encoding: .utf8) {
+            // Load as HTML string with the file's directory as baseURL
+            // This allows external resources (CDN scripts, fonts) to load
+            nsView.loadHTMLString(htmlString, baseURL: url.deletingLastPathComponent())
         } else {
-            // Handle the error if the file isn't found
-            let html = "<html><body><h1>Error: \(localFileName).html not found.</h1></body></html>"
+            // Handle the error if the file isn't found or can't be read
+            let html = "<html><body><h1>Error: \(localFileName).html not found or could not be read.</h1></body></html>"
             nsView.loadHTMLString(html, baseURL: nil)
         }
     }

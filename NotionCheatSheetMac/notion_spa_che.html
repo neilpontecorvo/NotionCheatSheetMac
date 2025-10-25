@@ -271,6 +271,7 @@
             
             const systemPrompt = "You are a helpful assistant who is an expert in Notion. The user is asking for an explanation of a specific Notion shortcut. Provide a clear, concise explanation (1-2 paragraphs) of what the shortcut does and a practical example of when a user would want to use it. Format your response in simple HTML with paragraphs and bold tags.";
             const userQuery = `Explain the Notion shortcut "${action}" (which uses the keys "${shortcut}"). What does it do and when would I use it?`;
+            // TODO: Add your Gemini API key here - Get one free at https://aistudio.google.com/apikey
             const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
@@ -283,6 +284,11 @@
 
             let responseText = '';
             try {
+                // Check if API key is set
+                if (!apiKey || apiKey.trim() === "") {
+                    throw new Error("API key not configured. Please add your Gemini API key to the HTML file. Get one free at https://aistudio.google.com/apikey");
+                }
+
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
